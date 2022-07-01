@@ -1,0 +1,142 @@
+import numpy as np 
+import pandas as pd 
+import seaborn as sns
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import cross_val_score, GridSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelBinarizer, OneHotEncoder, StandardScaler
+from sklearn import set_config
+
+import os
+for dirname, _, filenames in os.walk('/kaggle/input'):
+    for filename in filenames:
+        print(os.path.join(dirname, filename))
+        
+  # Let's first load the data using pandas
+train = pd.read_csv('/kaggle/input/titanic/train.csv')
+test = pd.read_csv('/kaggle/input/titanic/test.csv')
+
+
+features = ['Pclass', 'Name', 'Sex', 'Age', 'SibSp', 'Parch', 'Ticket', 'Fare', 'Cabin', 'Embarked']
+target = 'Survived'
+
+print(train.shape)
+train.head()
+
+sns.pairplot(train, hue="Survived")
+
+pd.DataFrame(np.round(train.isna().sum()/len(train)*100,2), columns=['percentage_missing'])
+
+def pipeline(numerical_imputer, numerical_scaler, numerical_features, categorical_imputer, categorical_encoder, categorical_features, estimator):
+    numerical_transformer = Pipeline(
+        steps=[
+            ("numerical_imputer", numerical_imputer),
+            ("numerical_scaler", numerical_scaler),
+        ]
+    )
+    categorical_transformer = Pipeline(
+        steps=[
+            ("categorical_imputer", categorical_imputer),
+            ("categorical_encoder", categorical_encoder),
+        ]
+    )
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numerical_transformer, numerical_features),
+            ("cat", categorical_transformer, categorical_features),
+        ]
+    )
+    clf = Pipeline(  # or just Pipeline if we don't care about PMML format
+        steps=[("preprocessor", preprocessor), ("classifier", estimator)]
+    )
+    return clf
+    
+    
+    
+    
+    random_state = 0
+numerical_imputer = SimpleImputer(strategy='mean')
+numerical_scaler = StandardScaler()
+numerical_features = ['Age', 'Fare']
+categorical_imputer = SimpleImputer(strategy='most_frequent')
+categorical_encoder = OneHotEncoder(handle_unknown='ignore')
+categorical_features = ['Pclass'
+            , 'Sex'	
+            , 'SibSp'
+            , 'Parch'
+            , 'Ticket'
+            , 'Embarked'
+           ]
+estimator = GradientBoostingClassifier(random_state = random_state)
+
+X_train = train[numerical_features + categorical_features]
+X_test = test[numerical_features + categorical_features]
+y_train = train[target]
+
+
+
+model = pipeline(numerical_imputer = numerical_imputer
+                 , numerical_scaler = numerical_scaler
+                 , numerical_features = numerical_features  
+                 , categorical_imputer = categorical_imputer
+                 , categorical_encoder = categorical_encoder
+                 , categorical_features = categorical_features
+                 , estimator = estimator)
+                 
+                 
+                 
+set_config(display="diagram")
+model
+
+scores = cross_val_score(model, X_train, y_train, cv=5, scoring = 'roc_auc')
+print("Average CV score:", scores.mean())
+
+
+parameter_grid = {
+    "classifier__n_estimators": [250, 500, 750, 1000],
+    
+}
+search = GridSearchCV(model, parameter_grid, n_jobs=2)
+search = search.fit(X_train, y_train)
+
+
+
+print("Best parameter (CV score=%0.3f):" % search.best_score_)
+print(search.best_params_)
+pd.DataFrame(search.cv_results_)[['param_classifier__n_estimators', 'mean_test_score', 'std_test_score', 'rank_test_score']]
+
+
+
+final_estimator = GradientBoostingClassifier(random_state = random_state, n_estimators=1000)
+final_model = pipeline(numerical_imputer = numerical_imputer
+                 , numerical_scaler = numerical_scaler
+                 , numerical_features = numerical_features  
+                 , categorical_imputer = categorical_imputer
+                 , categorical_encoder = categorical_encoder
+                 , categorical_features = categorical_features
+                 , estimator = final_estimator)
+final_scores = cross_val_score(final_model, X_train, y_train, cv=5, scoring = 'roc_auc')
+print("Average CV score:", final_scores.mean())
+
+
+
+
+final_model.fit(X=X_train, y=train[target])
+predictions = final_model.predict(X_test)
+
+
+
+#prepare the submission and load to submission.csv which is then used by kaggle (note that here we have to get the passenger id from test data in order for it to work)
+submission = pd.DataFrame({'PassengerId': test.PassengerId, 'Survived': predictions})
+submission.to_csv('submission.csv', index=False)
+print("Your submission was successfully saved!")
+
+
+
+
+        
+        
+        
+        
